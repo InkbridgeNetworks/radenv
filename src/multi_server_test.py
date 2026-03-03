@@ -145,7 +145,10 @@ def build_tests(
                 logger.debug("Skipping invalid test configuration.")
     else:
         try:
-            test_name = "custom_test" + "-" + compose_file.stem
+            if isinstance(config, Path) and config.is_file():
+                test_name = config.stem + "-" + compose_file.stem
+            else:
+                test_name = "custom_test" + "-" + compose_file.stem
             test_logger = create_test_logger(test_name, compose_file.stem)
 
             match listener_type:
