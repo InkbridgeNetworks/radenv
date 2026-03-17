@@ -183,7 +183,7 @@ def generate_config_files(
     if other_configs:
         write_yaml_to_file(other_configs, test_output)
 
-def render_template_only(file_path: Path, variables_path: Path = None, include_path: list = None, output_path: Path = None) -> None:
+def render_template_only(file_path: Path, variables_path: Path = None, include_path: list = None, output_path: Path = None, defines: dict = None) -> None:
     """
     Renders a Jinja2 template configuration file without additional parsing.
 
@@ -195,6 +195,9 @@ def render_template_only(file_path: Path, variables_path: Path = None, include_p
             Defaults to None.
         output_path (Path, optional): The path to output the rendered configuration file.
             defaults to the same name as the input file without the .j2 extension.
+            Defaults to None.
+        defines (dict, optional): Additional key=value pairs to add to template variables.
+            These override any variables loaded from the vars file.
             Defaults to None.
 
     Raises:
@@ -234,6 +237,10 @@ def render_template_only(file_path: Path, variables_path: Path = None, include_p
                     )
         with open(variables_path, "r", encoding="utf-8") as var_file:
             config_vars = yaml.safe_load(var_file)
+
+    # Merge in any command-line defines (overrides vars file)
+    if defines:
+        config_vars.update(defines)
 
     # Render the Jinja2 template
     template_loader = jinja2.FileSystemLoader(searchpath=[file_path.parent] + (include_path or []))
@@ -322,6 +329,24 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         action="append",
         default=[],
     )
+    parser.add_argument(
+        "--output-path",
+        dest="output_path",
+        type=Path,
+        help="Path to output the rendered configuration file. "
+        "Defaults to the same name as the input file without the .j2 extension.",
+        default=None,
+    )
+    parser.add_argument(
+        "-D",
+        "--define",
+        dest="defines",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Define a template variable as NAME=VALUE. "
+        "May be specified multiple times. Overrides variables from --vars-file.",
+    )
     return parser.parse_args(args)
 
 
@@ -331,12 +356,23 @@ def interface() -> None:
     """
     parsed_args = parse_args()
 
+    # Parse -D NAME=VALUE pairs into a dict
+    defines = {}
+    for d in parsed_args.defines:
+        if "=" not in d:
+            print(f"Error: --define argument must be in NAME=VALUE format, got: {d}", file=sys.stderr)
+            sys.exit(1)
+        name, value = d.split("=", 1)
+        defines[name] = value
+
     if parsed_args.auxiliary:
         try:
             render_template_only(
                 Path(parsed_args.config_file),
                 variables_path=parsed_args.variables_path,
                 include_path=parsed_args.include_path,
+                output_path=parsed_args.output_path,
+                defines=defines or None,
             )
         except (FileNotFoundError, ValueError) as e:
             print(f"Error: {e}", file=sys.stderr)
