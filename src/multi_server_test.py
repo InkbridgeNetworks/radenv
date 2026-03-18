@@ -83,6 +83,8 @@ def build_tests(
     compose_file: Path,
     seed: int | None = None,
     listener_type: ListenerType = ListenerType.SOCKET,
+    force_build: bool = False,
+    project_name: str | None = None,
 ) -> list[Test]:
     """
     Build a list of Test objects from the configuration.
@@ -137,6 +139,8 @@ def build_tests(
                         detail_level=VERBOSE_LEVEL,
                         loop=loop,
                         logger=test_logger,
+                        force_build=force_build,
+                        project_name=project_name,
                     )
                 )
             except ValueError as e:
@@ -178,6 +182,8 @@ def build_tests(
                     detail_level=VERBOSE_LEVEL,
                     loop=loop,
                     logger=test_logger,
+                    force_build=force_build,
+                    project_name=project_name,
                 )
             )
         except ValueError as e:
@@ -245,6 +251,8 @@ def main(
                     compose_file,
                     seed=kwargs.get("seed"),
                     listener_type=listener_type,
+                    force_build=kwargs.get("force_build", False),
+                    project_name=kwargs.get("project_name"),
                 )
 
                 # Create the test task group
@@ -262,6 +270,8 @@ def main(
                 compose_source,
                 seed=kwargs.get("seed"),
                 listener_type=listener_type,
+                force_build=kwargs.get("force_build", False),
+                project_name=kwargs.get("project_name"),
             )
 
             # Create the test task group
@@ -389,6 +399,20 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         action="count",
         help="Enable verbose logging.",
     )
+    parser.add_argument(
+        "--force-build",
+        dest="force_build",
+        action="store_true",
+        default=False,
+        help="Force building Docker images even if they already exist locally.",
+    )
+    parser.add_argument(
+        "--project-name",
+        dest="project_name",
+        type=str,
+        default=None,
+        help="Docker Compose project name. Defaults to <test-name>-<compose-file-stem>.",
+    )
     return parser.parse_args(args)
 
 
@@ -481,6 +505,8 @@ def interface() -> None:
                 configs=test_configs,
                 seed=parsed_args.seed,
                 listener_type=listener_type,
+                force_build=parsed_args.force_build,
+                project_name=parsed_args.project_name,
             )
         else:
             main(
@@ -488,6 +514,8 @@ def interface() -> None:
                 configs=parsed_args.test,
                 seed=parsed_args.seed,
                 listener_type=listener_type,
+                force_build=parsed_args.force_build,
+                project_name=parsed_args.project_name,
             )
 
     else:
@@ -496,6 +524,8 @@ def interface() -> None:
             configs=parsed_args.test,
             seed=parsed_args.seed,
             listener_type=listener_type,
+            force_build=parsed_args.force_build,
+            project_name=parsed_args.project_name,
         )
 
 

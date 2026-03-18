@@ -262,6 +262,84 @@ def render_template_only(file_path: Path, variables_path: Path = None, include_p
     with open(output_path, "w", encoding="utf-8") as file:
         file.write(rendered_config)
 
+def process_compose_volumes(
+    rendered_compose: str,
+    data_path: Path,
+    output_path: Path,
+    config_vars: dict = None,
+    include_path: list = None,
+) -> None:
+    """
+    Parse a rendered Docker Compose file, find all volume mounts that
+    reference ${DATA_PATH}, and copy or render the source files into
+    the output directory preserving directory structure.
+
+    For .j2 source files, the template is rendered with config_vars.
+    For all other files, a plain copy is performed.
+
+    Args:
+        rendered_compose (str): The rendered compose file content.
+        data_path (Path): The source directory that ${DATA_PATH} maps to.
+        output_path (Path): The output directory where files should be placed.
+            Volume sources will be reproduced relative to this directory.
+        config_vars (dict, optional): Variables for rendering .j2 templates.
+        include_path (list, optional): Additional search paths for Jinja2 includes.
+    """
+    import re
+    import shutil
+
+    # Find all ${DATA_PATH}/... references in volume mount sources
+    # Volume format is "source:dest" or "source:dest:mode"
+    pattern = re.compile(r'\$\{DATA_PATH\}/([^:]+)')
+
+    seen = set()
+    for match in pattern.finditer(rendered_compose):
+        rel_path = match.group(1)
+        if rel_path in seen:
+            continue
+        seen.add(rel_path)
+
+        src = data_path / rel_path
+        dst = output_path / rel_path
+
+        # Source might be a .j2 template that needs rendering
+        src_j2 = Path(str(src) + ".j2")
+
+        if src_j2.exists():
+            # Render the .j2 template
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            print(f"RENDER\t{src_j2} -> {dst}")
+
+            template_loader = jinja2.FileSystemLoader(
+                searchpath=[src_j2.parent] + (include_path or [])
+            )
+            template_env = jinja2.Environment(loader=template_loader)
+            template_env.globals.update(os=os)
+            template = template_env.get_template(src_j2.name)
+
+            try:
+                rendered = template.render(config_vars or {})
+            except Exception as e:
+                raise ValueError(f"Error rendering {src_j2}: {e}")
+
+            with open(dst, "w", encoding="utf-8") as f:
+                f.write(rendered)
+
+        elif src.exists():
+            # Copy static file or directory
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                print(f"COPY\t{src}/ -> {dst}/")
+                shutil.copytree(src, dst)
+            else:
+                print(f"COPY\t{src} -> {dst}")
+                shutil.copy2(src, dst)
+        else:
+            print(f"WARNING: volume source not found: {src} (and no {src_j2})")
+
+
 def parse_args(args=None, prog=__package__) -> argparse.Namespace:
     """
     Parses command line arguments for the configuration parser.
@@ -347,6 +425,22 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         help="Define a template variable as NAME=VALUE. "
         "May be specified multiple times. Overrides variables from --vars-file.",
     )
+    parser.add_argument(
+        "--process-volumes",
+        dest="process_volumes",
+        action="store_true",
+        default=False,
+        help="After rendering a compose template, scan for volume mounts "
+        "referencing ${DATA_PATH} and copy or render the source files "
+        "into the output directory. Requires --volume-src and --output-path.",
+    )
+    parser.add_argument(
+        "--volume-src",
+        dest="volume_src",
+        type=Path,
+        help="Source directory that ${DATA_PATH} maps to when using --process-volumes.",
+        default=None,
+    )
     return parser.parse_args(args)
 
 
@@ -377,6 +471,39 @@ def interface() -> None:
         except (FileNotFoundError, ValueError) as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
+
+        # If --process-volumes is set, scan the rendered compose file
+        # for ${DATA_PATH} volume mounts and copy/render them.
+        if parsed_args.process_volumes:
+            if not parsed_args.volume_src:
+                print("Error: --process-volumes requires --volume-src", file=sys.stderr)
+                sys.exit(1)
+            if not parsed_args.output_path:
+                print("Error: --process-volumes requires --output-path", file=sys.stderr)
+                sys.exit(1)
+
+            # Load vars for rendering any .j2 config templates
+            config_vars = {}
+            if parsed_args.variables_path:
+                with open(parsed_args.variables_path, "r", encoding="utf-8") as f:
+                    config_vars = yaml.safe_load(f)
+            if defines:
+                config_vars.update(defines)
+
+            with open(parsed_args.output_path, "r", encoding="utf-8") as f:
+                rendered_compose = f.read()
+
+            try:
+                process_compose_volumes(
+                    rendered_compose,
+                    data_path=parsed_args.volume_src,
+                    output_path=parsed_args.output_path.parent,
+                    config_vars=config_vars,
+                    include_path=parsed_args.include_path,
+                )
+            except (FileNotFoundError, ValueError) as e:
+                print(f"Error processing volumes: {e}", file=sys.stderr)
+                sys.exit(1)
 
         print("Auxiliary configuration file rendered successfully.")
         sys.exit(0)

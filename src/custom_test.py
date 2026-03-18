@@ -70,6 +70,8 @@ class Test:
         detail_level: int,
         loop: asyncio.AbstractEventLoop,
         logger: logging.Logger = None,
+        force_build: bool = False,
+        project_name: str | None = None,
     ) -> None:
         self.name = name
         self.states = states
@@ -78,10 +80,13 @@ class Test:
         self.loop = loop
         self.logger = logger or create_test_logger(name, compose_file.stem)
         self.detail_level = detail_level
+        self.force_build = force_build
         self.queue: asyncio.Queue = asyncio.Queue()
         self.listener_task: asyncio.Task = None
+        if project_name is None:
+            project_name = f"{self.name}-{self.compose_file.stem}"
         self.client = DockerClient(
-            compose_files=[self.compose_file], compose_project_name=self.name
+            compose_files=[self.compose_file], compose_project_name=project_name
         )
         self.__ready_future: asyncio.Future = self.loop.create_future()
         match listener_dest.suffix:
@@ -118,8 +123,16 @@ class Test:
             "Listener is ready. Beginning test setup for %s.", self.name
         )
 
-        # Build the Docker Compose services
-        self.client.compose.build(quiet=True)
+        # Build Docker Compose services only if forced or if any
+        # service defines a build context.
+        config = self.client.compose.config()
+        buildable = [
+            name for name, svc in config.services.items()
+            if svc.build is not None
+        ]
+        if self.force_build or buildable:
+            self.logger.info("Building images: %s", ", ".join(buildable) if buildable else "all")
+            self.client.compose.build(buildable if buildable else None, quiet=True)
 
         # Start the Docker Compose services
         if log_containers:
