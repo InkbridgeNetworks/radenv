@@ -208,9 +208,11 @@ async def run_tests(tests: list[Test]) -> None:
         async with asyncio.TaskGroup() as tg:
             for test in tests:
                 tg.create_task(test.run(VERBOSE_LEVEL >= 3))
-    except* ValueError as eg:
+    except* Exception as eg:
         for e in eg.exceptions:
             logger.error("An error occurred while running tests: %s", e)
+        logger.info("Tests completed with errors.")
+        sys.exit(1)
 
     logger.info("All tests completed.")
 
@@ -300,6 +302,7 @@ def main(
         loop.run_forever()
     except Exception as e:
         logger.error("An error occurred while running tests: %s", e)
+        sys.exit(1)
     finally:
         logger.debug("Closing the event loop...")
         loop.close()
