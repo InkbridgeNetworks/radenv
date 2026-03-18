@@ -109,7 +109,7 @@ def build_tests(
 
     if isinstance(config, Path) and config.is_dir():
         for test_file in config.glob("*.yml"):
-            test_name = test_file.stem + "-" + compose_file.stem
+            test_name = project_name if project_name else f"{test_file.stem}-{compose_file.stem}"
             test_logger = create_test_logger(test_name, compose_file.stem)
 
             match listener_type:
@@ -151,10 +151,12 @@ def build_tests(
                 logger.debug("Skipping invalid test configuration.")
     else:
         try:
-            if isinstance(config, Path) and config.is_file():
-                test_name = config.stem + "-" + compose_file.stem
+            if project_name:
+                test_name = project_name
+            elif isinstance(config, Path) and config.is_file():
+                test_name = f"{config.stem}-{compose_file.stem}"
             else:
-                test_name = "custom_test" + "-" + compose_file.stem
+                test_name = f"custom_test-{compose_file.stem}"
             test_logger = create_test_logger(test_name, compose_file.stem)
 
             match listener_type:
