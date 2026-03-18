@@ -72,6 +72,7 @@ class Test:
         logger: logging.Logger = None,
         force_build: bool = False,
         project_name: str | None = None,
+        log_dir: Path = Path("logs"),
     ) -> None:
         self.name = name
         self.states = states
@@ -81,6 +82,7 @@ class Test:
         self.logger = logger or create_test_logger(name, compose_file.stem)
         self.detail_level = detail_level
         self.force_build = force_build
+        self.log_dir = log_dir
         self.queue: asyncio.Queue = asyncio.Queue()
         self.listener_task: asyncio.Task = None
         if project_name is None:

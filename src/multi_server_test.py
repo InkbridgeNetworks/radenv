@@ -85,6 +85,7 @@ def build_tests(
     listener_type: ListenerType = ListenerType.SOCKET,
     force_build: bool = False,
     project_name: str | None = None,
+    log_dir: Path = Path("logs"),
 ) -> list[Test]:
     """
     Build a list of Test objects from the configuration.
@@ -141,6 +142,7 @@ def build_tests(
                         logger=test_logger,
                         force_build=force_build,
                         project_name=project_name,
+                        log_dir=log_dir,
                     )
                 )
             except ValueError as e:
@@ -184,6 +186,7 @@ def build_tests(
                     logger=test_logger,
                     force_build=force_build,
                     project_name=project_name,
+                    log_dir=log_dir,
                 )
             )
         except ValueError as e:
@@ -253,6 +256,7 @@ def main(
                     listener_type=listener_type,
                     force_build=kwargs.get("force_build", False),
                     project_name=kwargs.get("project_name"),
+                    log_dir=kwargs.get("log_dir", Path("logs")),
                 )
 
                 # Create the test task group
@@ -272,6 +276,7 @@ def main(
                 listener_type=listener_type,
                 force_build=kwargs.get("force_build", False),
                 project_name=kwargs.get("project_name"),
+                log_dir=kwargs.get("log_dir", Path("logs")),
             )
 
             # Create the test task group
@@ -400,6 +405,13 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         help="Enable verbose logging.",
     )
     parser.add_argument(
+        "--log-dir",
+        dest="log_dir",
+        type=Path,
+        help="Path to the directory to store test logs.",
+        default=Path(Path.cwd(), "logs"),
+    )
+    parser.add_argument(
         "--force-build",
         dest="force_build",
         action="store_true",
@@ -479,6 +491,12 @@ def interface() -> None:
     logger.debug("Using listener directory: %s", listener_dir)
     os.environ["LISTENER_DIR"] = str(listener_dir)
 
+    log_dir = parsed_args.log_dir
+    if not log_dir.exists():
+        logger.debug("Log directory %s does not exist, creating it.", log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+    logger.debug("Using log directory: %s", log_dir)
+
     if parsed_args.config_file:
         try:
             # Generate the compose and test config files
@@ -507,6 +525,7 @@ def interface() -> None:
                 listener_type=listener_type,
                 force_build=parsed_args.force_build,
                 project_name=parsed_args.project_name,
+                log_dir=log_dir,
             )
         else:
             main(
@@ -516,6 +535,7 @@ def interface() -> None:
                 listener_type=listener_type,
                 force_build=parsed_args.force_build,
                 project_name=parsed_args.project_name,
+                log_dir=log_dir,
             )
 
     else:
