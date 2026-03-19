@@ -171,10 +171,7 @@ class Test:
                 detach=True,
                 quiet=True,
             )
-            self.loop.run_in_executor(None, compose_up)
-
-        # Wait a moment to ensure everything is stable
-        await asyncio.sleep(2)
+            await self.loop.run_in_executor(None, compose_up)
 
         # List the containers
         containers = self.client.compose.ps()
