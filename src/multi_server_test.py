@@ -433,14 +433,14 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
     parser.add_argument(
         "--enable-container-logs",
         dest="enable_container_logs",
-        type=str,
+        action="store_true",
         default=True,
         help="Enable container logs. Defaults to True.",
     )
     parser.add_argument(
         "--combine-container-logs",
         dest="combine_container_logs",
-        type=str,
+        action="store_true",
         default=False,
         help="Combine container logs. Defaults to False.",
     )

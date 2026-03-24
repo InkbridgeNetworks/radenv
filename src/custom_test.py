@@ -68,15 +68,25 @@ def create_container_logger(name: str, log_dir: Path = Path("logs")) -> logging.
     # Set filename for FileHandler
     container_log_file = log_dir / f"{name}.log"
 
-    # Setup logger
-    logger = logging.getLogger(name)
+    # Setup logger in dedicated namespace
+    logger = logging.getLogger(f"Container.{name}")
     main_logger = logging_helper.get_logger()
     logger.setLevel(main_logger.level)
 
-    container_file_handler = logging.FileHandler(container_log_file, encoding="utf-8")
-    container_file_handler.setLevel(main_logger.level)
-    container_file_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(container_file_handler)
+    # Prevent messages from propagating to ancestor loggers and duplicating output
+    logger.propagate = False
+
+    # Only add a new FileHandler if an equivalent one is not already present
+    handler_exists = False
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler) and getattr(handler, "baseFilename", None) == str(container_log_file):
+            handler_exists = True
+            break
+    if not handler_exists:
+        container_file_handler = logging.FileHandler(container_log_file, encoding="utf-8")
+        container_file_handler.setLevel(main_logger.level)
+        container_file_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(container_file_handler)
 
     logger.debug("Created logger for container: %s (log file: %s)", name, container_log_file)
 
@@ -176,7 +186,7 @@ class Test:
         # Start the Docker Compose services
         if log_containers:
             if combine_container_logs:
-                # Stream all contain logs into one stream
+                # Stream all container logs into one stream
                 compose_up = partial(
                     self.client.compose.up,
                     stream_logs=True,
@@ -242,7 +252,11 @@ class Test:
                                 if log_data != last_log:
                                     new_data = log_data[len(last_log):]
                                     for line in new_data.splitlines():
-                                        container_logger.info(line.strip())
+                                        if isinstance(line, bytes):
+                                            text_line = line.strip().decode("utf-8", errors="replace")
+                                        else:
+                                            text_line = line.strip()
+                                        container_logger.info(text_line)
                                     last_log = log_data
                                 await asyncio.sleep(1)
                             except (NoSuchContainer, DockerException):
