@@ -72,6 +72,9 @@ def create_container_logger(name: str, log_dir: Path = Path("logs")) -> logging.
     logger = logging.getLogger(f"Container.{name}")
     main_logger = logging_helper.get_logger()
     logger.setLevel(main_logger.level)
+    # Prevent container log lines from propagating to parent/root handlers
+    # (e.g., the console), which would flood the test output.
+    logger.propagate = False
 
     container_file_handler = logging.FileHandler(container_log_file, encoding="utf-8")
     container_file_handler.setLevel(main_logger.level)
