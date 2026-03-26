@@ -25,7 +25,6 @@ from pathlib import Path
 import re
 
 from python_on_whales import DockerClient
-from python_on_whales.exceptions import NoSuchContainer, DockerException
 
 from src import logging_helper
 from src.states.state import State
@@ -196,7 +195,7 @@ class Test:
                             line = await proc.stdout.readline()
                             if not line:
                                 break
-                            container_logger.info(line.strip().decode("utf-8", errors="replace"))
+                            container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="replace"))
                     except Exception as e:
                         container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
 
@@ -269,14 +268,13 @@ class Test:
 
         self.logger.info("Cleanup complete for test: %s", self.name)
 
-        # Clean up any container logging tasks if they exist
-        if hasattr(self, "container_logging_tasks"):
-            for task in self.container_logging_tasks:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        # Clean up any container logging tasks
+        for task in self.container_logging_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def run(self, log_containers: bool) -> None:
         """

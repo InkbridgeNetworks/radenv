@@ -433,9 +433,9 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
     parser.add_argument(
         "--enable-container-logs",
         dest="enable_container_logs",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable container logs. Defaults to True.",
+        help="Enable container logs. Use --no-enable-container-logs to disable. Defaults to True.",
     )
     return parser.parse_args(args)
 
