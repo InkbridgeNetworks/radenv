@@ -518,11 +518,11 @@ def interface() -> None:
 
     global enable_container_logs
     enable_container_logs = parsed_args.enable_container_logs
-    logger.info("Container logs enabled: %s", enable_container_logs)
+    logger.debug("Container logs enabled: %s", enable_container_logs)
 
     global combine_container_logs
     combine_container_logs = parsed_args.combine_container_logs
-    logger.info("Combine container logs: %s", combine_container_logs)
+    logger.debug("Combine container logs: %s", combine_container_logs)
 
     if parsed_args.config_file:
         try:
