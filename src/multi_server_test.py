@@ -207,7 +207,7 @@ async def run_tests(tests: list[Test]) -> None:
     try:
         async with asyncio.TaskGroup() as tg:
             for test in tests:
-                tg.create_task(test.run(enable_container_logs, combine_container_logs))
+                tg.create_task(test.run(enable_container_logs))
     except* Exception as eg:
         for e in eg.exceptions:
             logger.error("An error occurred while running tests: %s", e)
@@ -437,13 +437,6 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         default=True,
         help="Enable container logs. Defaults to True.",
     )
-    parser.add_argument(
-        "--combine-container-logs",
-        dest="combine_container_logs",
-        action="store_true",
-        default=False,
-        help="Combine container logs. Defaults to False.",
-    )
     return parser.parse_args(args)
 
 
@@ -519,10 +512,6 @@ def interface() -> None:
     global enable_container_logs
     enable_container_logs = parsed_args.enable_container_logs
     logger.debug("Container logs enabled: %s", enable_container_logs)
-
-    global combine_container_logs
-    combine_container_logs = parsed_args.combine_container_logs
-    logger.debug("Combine container logs: %s", combine_container_logs)
 
     if parsed_args.config_file:
         try:

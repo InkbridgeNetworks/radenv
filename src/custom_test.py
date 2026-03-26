@@ -73,17 +73,10 @@ def create_container_logger(name: str, log_dir: Path = Path("logs")) -> logging.
     main_logger = logging_helper.get_logger()
     logger.setLevel(main_logger.level)
 
-    # Only add a new FileHandler if an equivalent one is not already present
-    handler_exists = False
-    for handler in logger.handlers:
-        if isinstance(handler, logging.FileHandler) and getattr(handler, "baseFilename", None) == str(container_log_file):
-            handler_exists = True
-            break
-    if not handler_exists:
-        container_file_handler = logging.FileHandler(container_log_file, encoding="utf-8")
-        container_file_handler.setLevel(main_logger.level)
-        container_file_handler.setFormatter(logging.Formatter("%(message)s"))
-        logger.addHandler(container_file_handler)
+    container_file_handler = logging.FileHandler(container_log_file, encoding="utf-8")
+    container_file_handler.setLevel(main_logger.level)
+    container_file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(container_file_handler)
 
     logger.debug("Created logger for container: %s (log file: %s)", name, container_log_file)
 
@@ -144,13 +137,12 @@ class Test:
         self.container_logging_tasks = []
         self.validation_task: asyncio.Task = None
 
-    async def __setup_test(self, log_containers: bool, combine_container_logs: bool) -> None:
+    async def __setup_test(self, log_containers: bool) -> None:
         """
         Sets up the test by initializing necessary resources.
 
         Args:
             log_containers (bool): Whether to log container outputs.
-            combine_container_logs (bool): Whether to combine logs from all containers into a single stream.
         """
         self.logger.info("Setting up test: %s", self.name)
 
@@ -178,69 +170,35 @@ class Test:
         if log_containers:
             self.logger.info("Logging is enabled for containers in test: %s", self.name)
 
-            if combine_container_logs:
-                # Stream all container logs into one stream
-                self.logger.info("Combining container logs into one stream: %s", combine_container_logs)
+            compose_up = partial(
+                self.client.compose.up,
+                detach=True,
+            )
+            await self.loop.run_in_executor(None, compose_up)
 
-                compose_up = partial(
-                    self.client.compose.up,
-                    stream_logs=True,
-                )
-                logs = await self.loop.run_in_executor(None, compose_up)
+            containers = self.client.compose.ps()
+            for container in containers:
+                # Create logger for container
+                container_logger = create_container_logger(container.name, self.log_dir)
 
-                async def stream_logs() -> None:
+                async def stream_container_logs(container_name=container.name, container_logger=container_logger) -> None:
+                    container_logger.info("Starting log stream for container: %s", container_name)
                     try:
-                        while True:
-                            log = await self.loop.run_in_executor(
-                                None, next, logs, None
-                            )
-                            if log is None:
-                                pass
-                            else:
-                                log_line = log[1].decode().strip()
-                                self.logger.debug(
-                                    "[compose] %s: %s", log[0], log_line
-                                )
-                    except Exception as e:
-                        self.logger.error(
-                            "Error while streaming compose logs: %s", e
+                        proc = await asyncio.create_subprocess_exec(
+                            "docker", "logs", "-f", container_name,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.STDOUT,
                         )
+                        while True:
+                            line = await proc.stdout.readline()
+                            if not line:
+                                break
+                            container_logger.info(line.strip().decode("utf-8", errors="replace"))
+                    except Exception as e:
+                        container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
 
-                self.logging_task = self.loop.create_task(stream_logs())
-            else:
-
-                # Container logs saved to separate files
-                self.logger.info("Combining container logs into one stream: %s", combine_container_logs)
-
-                compose_up = partial(
-                    self.client.compose.up,
-                    detach=True,
-                )
-                await self.loop.run_in_executor(None, compose_up)
-
-                containers = self.client.compose.ps()
-                for container in containers:
-                    # Create logger for container
-                    container_logger = create_container_logger(container.name, self.log_dir)
-
-                    async def stream_container_logs(container_name=container.name, container_logger=container_logger) -> None:
-                        container_logger.info("Starting log stream for container: %s", container_name)
-                        try:
-                            proc = await asyncio.create_subprocess_exec(
-                                "docker", "logs", "-f", container_name,
-                                stdout=asyncio.subprocess.PIPE,
-                                stderr=asyncio.subprocess.STDOUT,
-                            )
-                            while True:
-                                line = await proc.stdout.readline()
-                                if not line:
-                                    break
-                                container_logger.info(line.strip().decode("utf-8", errors="replace"))
-                        except Exception as e:
-                            container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
-
-                    task = self.loop.create_task(stream_container_logs())
-                    self.container_logging_tasks.append(task)
+                task = self.loop.create_task(stream_container_logs())
+                self.container_logging_tasks.append(task)
 
         else:
             compose_up = partial(
@@ -317,16 +275,15 @@ class Test:
                 except asyncio.CancelledError:
                     pass
 
-    async def run(self, log_containers: bool, combine_container_logs: bool) -> None:
+    async def run(self, log_containers: bool) -> None:
         """
         Runs the test by orchestrating the execution of states and managing resources.
 
         Args:
             log_containers (bool): Whether to log container outputs.
-            combine_container_logs (bool): Whether to combine container logs into a single stream.
         """
         try:
-            await self.__setup_test(log_containers, combine_container_logs)
+            await self.__setup_test(log_containers)
 
             test_task = self.loop.create_task(self.__run())
             await asyncio.wait_for(test_task, timeout=self.timeout)
