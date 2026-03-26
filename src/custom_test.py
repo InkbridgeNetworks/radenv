@@ -195,7 +195,7 @@ class Test:
                             line = await proc.stdout.readline()
                             if not line:
                                 break
-                            container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="replace"))
+                            container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="backslashreplace"))
                     except Exception as e:
                         container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
 
