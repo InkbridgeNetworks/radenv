@@ -207,7 +207,7 @@ async def run_tests(tests: list[Test]) -> None:
     try:
         async with asyncio.TaskGroup() as tg:
             for test in tests:
-                tg.create_task(test.run(VERBOSE_LEVEL >= 3))
+                tg.create_task(test.run(enable_container_logs))
     except* Exception as eg:
         for e in eg.exceptions:
             logger.error("An error occurred while running tests: %s", e)
@@ -430,6 +430,13 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         default=None,
         help="Docker Compose project name. Defaults to <test-name>-<compose-file-stem>.",
     )
+    parser.add_argument(
+        "--enable-container-logs",
+        dest="enable_container_logs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable container logs. Use --no-enable-container-logs to disable. Defaults to True.",
+    )
     return parser.parse_args(args)
 
 
@@ -502,6 +509,10 @@ def interface() -> None:
         log_dir.mkdir(parents=True, exist_ok=True)
     logger.debug("Using log directory: %s", log_dir)
 
+    global enable_container_logs
+    enable_container_logs = parsed_args.enable_container_logs
+    logger.debug("Container logs enabled: %s", enable_container_logs)
+
     if parsed_args.config_file:
         try:
             # Generate the compose and test config files
@@ -551,6 +562,7 @@ def interface() -> None:
             listener_type=listener_type,
             force_build=parsed_args.force_build,
             project_name=parsed_args.project_name,
+            log_dir=log_dir,
         )
 
 
