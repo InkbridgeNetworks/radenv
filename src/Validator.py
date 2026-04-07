@@ -93,13 +93,15 @@ class Validator:
                 Defaults to False.
 
         Returns:
-            str: A string representation of the validation results.
+            str: A string representation of the results.
         """
-        header = "Validation Results\n"
-        output = "\n"
-        output += "-" * (len(header) - 1) + "\n"
-        output += header
-        output += "-" * (len(header) - 1) + "\n"
+        header = "Validation Results"
+        detailed_tag = " (Detailed)" if detailed else ""
+        header += detailed_tag + "\n"
+        result_str = "\n"
+        result_str += "-" * (len(header) - 1) + "\n"
+        result_str += header
+        result_str += "-" * (len(header) - 1) + "\n"
 
         total = 0
         matched = 0
@@ -116,29 +118,36 @@ class Validator:
             matched += len(value)
 
             if detailed:
-                output += f"{colored(key, key_color)}:\n"
+                result_str += f"{colored(key, key_color)}:\n"
                 for v in value:
-                    output += f"{' ' * 4}{colored(v, 'green')}\n"
+                    result_str += f"{' ' * 4}{colored(v, 'green')}\n"
                 if key in self.__failed_rules:
                     for v in self.__failed_rules[key]:
-                        output += f"{' ' * 4}{colored(v, 'red')}\n"
+                        result_str += f"{' ' * 4}{colored(v, 'red')}\n"
             else:
-                output += f"{colored(key, key_color)}: {colored(f'{len(value)}/{len(self.__rules_map[key])}', key_color)}\n"
+                result_str += f"{colored(key, key_color)}: {colored(f'{len(value)}/{len(self.__rules_map[key])}', key_color)}\n"
 
         for key, values in self.__failed_rules.items():
             if key not in self.__passed_rules:
                 key_color = "red"
                 total += len(self.__rules_map[key])
 
-                output += f"{colored(key, key_color)}:\n"
+                result_str += f"{colored(key, key_color)}:\n"
                 for v in values:
-                    output += f"{' ' * 4}{colored(v, 'red')}\n"
+                    result_str += f"{' ' * 4}{colored(v, 'red')}\n"
 
-        output += "-" * (len(header) - 1) + "\n"
-        output += f"Matched: {colored(matched, 'green') if matched > 0 else matched} / {total} "
-        output += f"(Failures: {colored(total - matched, 'red') if total - matched > 0 else total - matched})\n"
-        output += "-" * (len(header) - 1) + "\n"
-        return output
+        result_str += "-" * (len(header) - 1) + "\n"
+        result_str += f"Matched: {colored(matched, 'green') if matched > 0 else matched} / {total} "
+        result_str += f"(Failures: {colored(total - matched, 'red') if total - matched > 0 else total - matched})\n"
+        result_str += "-" * (len(header) - 1) + "\n"
+
+        return result_str
+
+    def has_failures(self) -> bool:
+        """
+        Returns True if any validation failures have been recorded.
+        """
+        return bool(self.__failed_rules)
 
     def validate(self, attribute: str, value: str) -> bool:
         """

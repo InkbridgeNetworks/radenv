@@ -26,7 +26,7 @@ import re
 
 from python_on_whales import DockerClient
 
-from src import logging_helper
+from src import ExitCodes, logging_helper
 from src.states.state import State
 from src.listener import Listener, SocketListener, FileListener
 
@@ -276,33 +276,49 @@ class Test:
             except asyncio.CancelledError:
                 pass
 
-    async def run(self, log_containers: bool) -> None:
+    async def run(self, log_containers: bool) -> int:
         """
         Runs the test by orchestrating the execution of states and managing resources.
 
         Args:
             log_containers (bool): Whether to log container outputs.
+
+        Returns:
+            int: exit code based on ExitCodes enum indicating the result of the test execution.
+
+        Raises:
+            Exception: Any unexpected exception raised during setup, execution, or teardown
+                of the test is propagated to the caller.
         """
         try:
             await self.__setup_test(log_containers)
 
             test_task = self.loop.create_task(self.__run())
-            await asyncio.wait_for(test_task, timeout=self.timeout)
+            exit_code = await asyncio.wait_for(test_task, timeout=self.timeout)
         except asyncio.TimeoutError:
             self.logger.error(
                 "Test %s timed out after %.2f seconds", self.name, self.timeout
             )
+            # Set exit code based on timeout error
+            exit_code = ExitCodes.TIMEOUT
         finally:
             await self.__teardown_test()
 
-    async def __run(self) -> None:
+        # Return exit code based on test task
+        return exit_code
+
+    async def __run(self) -> int:
         """
         Internal method to run the test states sequentially.
+
+        Returns:
+            int: exit code based on ExitCodes enum indicating the result of the test execution.
         """
         self.logger.info("Starting test: %s", self.name)
 
         self.logger.info("Starting test states for %s.", self.name)
         test_results = []
+        test_has_failures = []
         for state in self.states:
             self.logger.debug(
                 "Processing state: %s - %s", state.name, state.description
@@ -339,14 +355,22 @@ class Test:
             await state.wait_for_completion()
 
             self.logger.info("State completed: %s", state.name)
-            test_results.append(
-                state.validator.get_results_str(self.detail_level)
-            )
+
+            # Get the results string and code from the validator
+            result_str = state.validator.get_results_str(self.detail_level > 0)
+            test_results.append(result_str)
+
+            # Determine if there were any failures, add to state failures array
+            test_state_has_failures = state.validator.has_failures()
+            test_has_failures.append(test_state_has_failures)
+
             self.logger.info(
-                " %s %s",
+                " %s%s%s",
                 f"Test.{self.name}.{self.compose_file.stem}",
-                state.validator.get_results_str(self.detail_level),
+                result_str,
+                f"(State: {state.name}{f', Has Failures: {test_state_has_failures}' if test_state_has_failures else ''})",
             )
+
         self.logger.info("Test completed: %s", self.name)
 
         # Remove the coloring from the test results before logging to file
@@ -385,3 +409,5 @@ class Test:
             file_logger.info(
                 "%s %s", f"Test.{self.name}.{self.compose_file.stem}", result
             )
+
+        return ExitCodes.VALIDATION_FAILURE if (True in test_has_failures) else ExitCodes.SUCCESS
