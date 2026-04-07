@@ -27,7 +27,7 @@ import signal
 import sys
 from pathlib import Path
 
-from src import logging_helper
+from src import ExitCodes, logging_helper
 from src.states.state_tools import generate_states
 from src.custom_test import (
     Test,
@@ -43,13 +43,24 @@ listener_dir: Path = None
 logging_helper.setup_logging()
 logger = logging_helper.get_logger()
 
-
-async def cleanup_and_shutdown() -> None:
+codes: list = []
+async def cleanup_and_shutdown(task: asyncio.Task | None = None) -> None:
     """
     Clean up the tasks by cancelling them all and waiting for them to finish.
     """
     logger.info("Shutting down the tests...")
     logger.debug("Cleaning up tasks and shutting down the event loop...")
+    if task is not None:
+        if task.cancelled():
+            logger.debug("Task %s was already cancelled.", task.get_name())
+            codes.append(ExitCodes.GENERAL_EXCEPTION)
+        elif (exc := task.exception()) is not None:
+            logger.error("Task %s raised an exception: %s", task.get_name(), exc)
+            codes.append(ExitCodes.GENERAL_EXCEPTION)
+        else:
+            logger.debug("Task %s completed with result: %s", task.get_name(), task.result())
+            codes.append(task.result())
+
     tasks = [
         task
         for task in asyncio.all_tasks()
@@ -197,24 +208,51 @@ def build_tests(
     return tests
 
 
-async def run_tests(tests: list[Test]) -> None:
+async def run_tests(tests: list[Test]) -> int:
     """
     Run the provided tests.
 
     Args:
         tests (list[Test]): List of Test objects to run.
+
+    Returns:
+        int: ExitCode based on test results.
     """
+    tasks = []
+    had_exception = False
     try:
         async with asyncio.TaskGroup() as tg:
             for test in tests:
-                tg.create_task(test.run(enable_container_logs))
+                tasks.append(tg.create_task(test.run(enable_container_logs)))
     except* Exception as eg:
         for e in eg.exceptions:
             logger.error("An error occurred while running tests: %s", e)
         logger.info("Tests completed with errors.")
-        sys.exit(1)
+        had_exception = True
+
+    if had_exception:
+        return ExitCodes.GENERAL_EXCEPTION
 
     logger.info("All tests completed.")
+
+    # Collect all async test task exit codes and exceptions
+    task_exit_codes = []
+    for task in tasks:
+        if task.cancelled():
+            logger.error("A test task was cancelled: %s", task.get_name())
+            task_exit_codes.append(ExitCodes.GENERAL_EXCEPTION)
+        elif (exc := task.exception()) is not None:
+            logger.error("A test task raised an exception: %s", exc)
+            task_exit_codes.append(ExitCodes.GENERAL_EXCEPTION)
+        else:
+            task_exit_codes.append(task.result())
+
+    # Exit with appropriate code based on test results
+    if any (code == ExitCodes.GENERAL_EXCEPTION for code in task_exit_codes):
+        return ExitCodes.GENERAL_EXCEPTION
+    if any (code == ExitCodes.VALIDATION_FAILURE for code in task_exit_codes):
+        return ExitCodes.VALIDATION_FAILURE
+    return ExitCodes.SUCCESS
 
 
 def main(
@@ -222,7 +260,7 @@ def main(
     configs: Path | dict,
     listener_type: ListenerType = ListenerType.SOCKET,
     **kwargs,
-) -> None:
+) -> int:
     """
     Main function to run the multi-server tests.
 
@@ -231,6 +269,9 @@ def main(
         configs (Path | dict): Path to the test configuration file or a dictionary
             containing the config.
         **kwargs: Additional keyword arguments.
+
+    Returns:
+        int: 0 if all tests passed, non-zero if any test had failures or an error occurred.
     """
     # Run a test in an asynchronous event loop
     try:
@@ -268,8 +309,9 @@ def main(
 
                 # Start the shutdown when the test completes
                 test_task.add_done_callback(
-                    lambda _: asyncio.create_task(cleanup_and_shutdown())
+                    lambda task: asyncio.create_task(cleanup_and_shutdown(task))
                 )
+
         elif compose_source.is_file():
             # Generate the states from the config
             tests = build_tests(
@@ -288,7 +330,7 @@ def main(
 
             # Start the shutdown when the test completes
             test_task.add_done_callback(
-                lambda _: asyncio.create_task(cleanup_and_shutdown())
+                lambda task: asyncio.create_task(cleanup_and_shutdown(task))
             )
 
         else:
@@ -296,19 +338,23 @@ def main(
                 "Invalid compose source: %s. Must be a file or directory.",
                 compose_source,
             )
-            return
+            return ExitCodes.GENERAL_EXCEPTION
 
         # Run the event loop until all tasks are complete
         loop.run_forever()
     except Exception as e:
         logger.error("An error occurred while running tests: %s", e)
-        sys.exit(1)
+        return ExitCodes.GENERAL_EXCEPTION
     finally:
         logger.debug("Closing the event loop...")
         loop.close()
 
     logger.info("Multi-server tests completed.")
 
+    if ExitCodes.SUCCESS in codes:
+        return ExitCodes.SUCCESS
+    else:
+        return ExitCodes.VALIDATION_FAILURE
 
 def parse_args(args=None, prog=__package__) -> argparse.Namespace:
     """
@@ -446,6 +492,9 @@ def interface() -> None:
     """
     parsed_args = parse_args()
 
+    # Default exit code
+    ret = ExitCodes.SUCCESS
+
     if parsed_args.debug:
         logging_helper.add_debug_logging()
 
@@ -459,7 +508,7 @@ def interface() -> None:
             parsed_args.data_path,
         )
         logger.info("Exiting.")
-        sys.exit(1)
+        return ExitCodes.VALIDATION_FAILURE
     logger.debug("Setting DATA_PATH to %s", parsed_args.data_path)
     os.environ["DATA_PATH"] = str(parsed_args.data_path)
 
@@ -526,7 +575,7 @@ def interface() -> None:
             )
         except (FileNotFoundError, ValueError) as e:
             logger.error("Error generating config files: %s", e)
-            sys.exit(1)
+            return ExitCodes.GENERAL_EXCEPTION
 
         if compose_configs:
             write_yaml_to_file(
@@ -534,7 +583,7 @@ def interface() -> None:
                 Path(Path.cwd(), "docker-compose.yml"),
             )
         if test_configs:
-            main(
+            ret = main(
                 compose_source=Path(Path.cwd(), "docker-compose.yml"),
                 configs=test_configs,
                 seed=parsed_args.seed,
@@ -544,7 +593,7 @@ def interface() -> None:
                 log_dir=log_dir,
             )
         else:
-            main(
+            ret = main(
                 compose_source=Path(Path.cwd(), "docker-compose.yml"),
                 configs=parsed_args.test,
                 seed=parsed_args.seed,
@@ -555,7 +604,7 @@ def interface() -> None:
             )
 
     else:
-        main(
+        ret = main(
             compose_source=parsed_args.compose_source,
             configs=parsed_args.test,
             seed=parsed_args.seed,
@@ -564,6 +613,9 @@ def interface() -> None:
             project_name=parsed_args.project_name,
             log_dir=log_dir,
         )
+
+    # Return default exit code
+    sys.exit(ret)
 
 
 if __name__ == "__main__":
