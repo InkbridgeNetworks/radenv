@@ -54,6 +54,13 @@ class Validator:
         self.__rules_tracking = copy.deepcopy(rules_map)
         self.__passed_rules = {}
         self.__failed_rules = {}
+        #
+        #  Capture every value we actually validated per attribute,
+        #  so when a rule fails (or never matches because the value
+        #  never arrived) the result string can show what we DID see
+        #  alongside what we wanted.
+        #
+        self.__seen_values: dict[str, list[str]] = {}
 
         for key in self.__rules_map.keys():
             for rule in self.__rules_map[key]:
@@ -133,8 +140,21 @@ class Validator:
                 total += len(self.__rules_map[key])
 
                 result_str += f"{colored(key, key_color)}:\n"
+                result_str += f"{' ' * 4}expected:\n"
                 for v in values:
-                    result_str += f"{' ' * 4}{colored(v, 'red')}\n"
+                    result_str += f"{' ' * 8}{colored(v, 'red')}\n"
+                #
+                #  Surface what the validator actually observed so
+                #  the operator can see a FAIL vs a never-fired line,
+                #  or a field that just didn't match the pattern.
+                #
+                seen = self.__seen_values.get(key, [])
+                if seen:
+                    result_str += f"{' ' * 4}received ({len(seen)} event(s)):\n"
+                    for s in seen:
+                        result_str += f"{' ' * 8}{colored(s, 'yellow')}\n"
+                else:
+                    result_str += f"{' ' * 4}received: {colored('<no events with this trigger seen>', 'yellow')}\n"
 
         result_str += "-" * (len(header) - 1) + "\n"
         result_str += f"Matched: {colored(matched, 'green') if matched > 0 else matched} / {total} "
@@ -168,6 +188,8 @@ class Validator:
                 "No validation rules for attribute: %s", attribute
             )
             raise MissingRuleError(attribute)
+
+        self.__seen_values.setdefault(attribute, []).append(value)
 
         self.__logger.debug(
             "Validating attribute: %s, value: %s", attribute, value
