@@ -150,7 +150,7 @@ def parse_test_configs(
 
         state_config["name"] = state_name
         state_config["description"] = state.get("description", "")
-        state_config["timeout"] = state.get("verify", []).get("timeout", 15)
+        state_config["timeout"] = state.get("verify", {}).get("timeout", 15)
 
         # Parse the actions
         actions = []
