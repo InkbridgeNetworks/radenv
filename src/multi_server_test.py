@@ -481,7 +481,9 @@ def parse_args(args=None, prog=__package__) -> argparse.Namespace:
         dest="enable_container_logs",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable container logs. Use --no-enable-container-logs to disable. Defaults to True.",
+        help="Stream per-container logs to <log-dir>/<container>.log.  Use "
+             "--no-enable-container-logs to disable.  A failed compose up "
+             "always captures container logs regardless of this flag.",
     )
     return parser.parse_args(args)
 

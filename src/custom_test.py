@@ -144,11 +144,11 @@ class Test:
         Sets up the test by initializing necessary resources.
 
         Args:
-            log_containers (bool): Retained for API compatibility; per-container
-                file logs are captured unconditionally.  The previous meaning
-                (opt-in to console streaming) was a footgun - a failed
-                `compose up` would leave no logs to diagnose from, so we
-                now always stream to per-container files.
+            log_containers (bool): When True (the default), per-container logs
+                are streamed to `log_dir/<container>.log`.  The compose-up
+                error path captures logs unconditionally so a failed start
+                still leaves a diagnostic trail; the flag only controls the
+                steady-state streaming on a healthy start.
         """
         self.logger.info("Setting up test: %s", self.name)
 
@@ -197,29 +197,34 @@ class Test:
         # startup still gets its final output captured.
         containers = self.client.compose.ps(all=True)
 
+        # Stream container logs when requested OR when compose up
+        # failed (in which case we override `log_containers` so the
+        # operator always has something to diagnose from).
+        do_stream = log_containers or up_exc is not None
+
         for container in containers:
-            # One log file per container, in `self.log_dir`, regardless
-            # of whether the overall compose up succeeded.
-            container_logger = create_container_logger(container.name, self.log_dir)
+            if do_stream:
+                # One log file per container, in `self.log_dir`.
+                container_logger = create_container_logger(container.name, self.log_dir)
 
-            async def stream_container_logs(container_name=container.name, container_logger=container_logger) -> None:
-                container_logger.info("Starting log stream for container: %s", container_name)
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        "docker", "logs", "-f", container_name,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.STDOUT,
-                    )
-                    while True:
-                        line = await proc.stdout.readline()
-                        if not line:
-                            break
-                        container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="backslashreplace"))
-                except Exception as e:
-                    container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
+                async def stream_container_logs(container_name=container.name, container_logger=container_logger) -> None:
+                    container_logger.info("Starting log stream for container: %s", container_name)
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            "docker", "logs", "-f", container_name,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.STDOUT,
+                        )
+                        while True:
+                            line = await proc.stdout.readline()
+                            if not line:
+                                break
+                            container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="backslashreplace"))
+                    except Exception as e:
+                        container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
 
-            task = self.loop.create_task(stream_container_logs())
-            self.container_logging_tasks.append(task)
+                task = self.loop.create_task(stream_container_logs())
+                self.container_logging_tasks.append(task)
 
             self.logger.debug("Container %s is running.", container.name)
 
@@ -291,12 +296,15 @@ class Test:
             except asyncio.CancelledError:
                 pass
 
-    async def run(self, log_containers: bool) -> int:
+    async def run(self, log_containers: bool = True) -> int:
         """
         Runs the test by orchestrating the execution of states and managing resources.
 
         Args:
-            log_containers (bool): Whether to log container outputs.
+            log_containers (bool): Whether to stream container logs to
+                per-container files under `log_dir`.  Defaults to True.
+                A failed compose-up forces streaming on regardless, so
+                the operator always has a diagnostic trail.
 
         Returns:
             int: exit code based on ExitCodes enum indicating the result of the test execution.
