@@ -144,7 +144,11 @@ class Test:
         Sets up the test by initializing necessary resources.
 
         Args:
-            log_containers (bool): Whether to log container outputs.
+            log_containers (bool): Retained for API compatibility; per-container
+                file logs are captured unconditionally.  The previous meaning
+                (opt-in to console streaming) was a footgun - a failed
+                `compose up` would leave no logs to diagnose from, so we
+                now always stream to per-container files.
         """
         self.logger.info("Setting up test: %s", self.name)
 
@@ -168,53 +172,64 @@ class Test:
             self.logger.info("Building images: %s", ", ".join(buildable) if buildable else "all")
             self.client.compose.build(buildable if buildable else None, quiet=True)
 
-        # Start the Docker Compose services
-        if log_containers:
-            self.logger.info("Logging is enabled for containers in test: %s", self.name)
-
-            compose_up = partial(
-                self.client.compose.up,
-                detach=True,
-            )
+        # Start the Docker Compose services.
+        #
+        # Wrap the up() call so that if it fails part-way (e.g. a
+        # dependency became unhealthy), we still enumerate whatever
+        # containers compose DID create and capture their logs.  The
+        # exit state of a crashed container is the main thing an
+        # operator needs to diagnose the failure; letting the exception
+        # propagate with no log files leaves them blind.
+        compose_up = partial(
+            self.client.compose.up,
+            detach=True,
+            quiet=True,
+        )
+        up_exc: Exception | None = None
+        try:
             await self.loop.run_in_executor(None, compose_up)
+        except Exception as e:
+            up_exc = e
+            self.logger.error("docker compose up failed: %s", e)
 
-            containers = self.client.compose.ps()
-            for container in containers:
-                # Create logger for container
-                container_logger = create_container_logger(container.name, self.log_dir)
-
-                async def stream_container_logs(container_name=container.name, container_logger=container_logger) -> None:
-                    container_logger.info("Starting log stream for container: %s", container_name)
-                    try:
-                        proc = await asyncio.create_subprocess_exec(
-                            "docker", "logs", "-f", container_name,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.STDOUT,
-                        )
-                        while True:
-                            line = await proc.stdout.readline()
-                            if not line:
-                                break
-                            container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="backslashreplace"))
-                    except Exception as e:
-                        container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
-
-                task = self.loop.create_task(stream_container_logs())
-                self.container_logging_tasks.append(task)
-
-        else:
-            compose_up = partial(
-                self.client.compose.up,
-                detach=True,
-                quiet=True,
-            )
-            await self.loop.run_in_executor(None, compose_up)
-
-        # List the containers
-        containers = self.client.compose.ps()
+        # Enumerate every container compose is aware of - including
+        # stopped / exited ones - so a container that crashed on
+        # startup still gets its final output captured.
+        containers = self.client.compose.ps(all=True)
 
         for container in containers:
+            # One log file per container, in `self.log_dir`, regardless
+            # of whether the overall compose up succeeded.
+            container_logger = create_container_logger(container.name, self.log_dir)
+
+            async def stream_container_logs(container_name=container.name, container_logger=container_logger) -> None:
+                container_logger.info("Starting log stream for container: %s", container_name)
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "docker", "logs", "-f", container_name,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                    )
+                    while True:
+                        line = await proc.stdout.readline()
+                        if not line:
+                            break
+                        container_logger.info(line.rstrip(b"\n").decode("utf-8", errors="backslashreplace"))
+                except Exception as e:
+                    container_logger.error("Error while streaming logs for container %s: %s", container_name, e)
+
+            task = self.loop.create_task(stream_container_logs())
+            self.container_logging_tasks.append(task)
+
             self.logger.debug("Container %s is running.", container.name)
+
+        # If compose up failed, propagate the error now that per-container
+        # log files have been seeded with whatever `docker logs` will
+        # yield.  Yield briefly first so the streaming tasks can flush
+        # any already-buffered output before teardown cancels them.
+        if up_exc is not None:
+            await asyncio.sleep(0.5)
+            raise up_exc
 
     async def __teardown_test(self) -> None:
         """
