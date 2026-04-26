@@ -241,6 +241,12 @@ class FileListener(Listener):
             else:
                 self.listener_dest.unlink()
 
+        # "w+" creates + truncates so a reused environment doesn't
+        # carry over leftover lines from the previous run.
+        self.listener_source = await aiofiles.open(
+            self.listener_dest, mode="w+", encoding="utf-8"
+        )
+
         # Notify that the listener is ready
         if not self.ready_future.done():
             self.ready_future.set_result(True)
