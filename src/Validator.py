@@ -20,23 +20,12 @@ Validator object
 """
 
 import asyncio
-import copy
 import logging
 
 from termcolor import colored
 
-from src.rules.rules import SingleRuleFailure
+from src.check import Check
 from src import logging_helper
-
-
-class MissingRuleError(Exception):
-    """
-    Exception raised when a rule is missing for a given attribute.
-    """
-
-    def __init__(self, attribute: str) -> None:
-        super().__init__(f"No rules defined for attribute: {attribute}")
-        self.attribute = attribute
 
 
 class Validator:
@@ -46,50 +35,13 @@ class Validator:
 
     def __init__(
         self,
-        rules_map: dict,
+        checks: list[Check],
         state_completed: asyncio.Future,
         logger: logging.Logger = logging_helper.get_logger(),
     ) -> None:
-        self.__rules_map = rules_map
-        self.__rules_tracking = copy.deepcopy(rules_map)
-        self.__passed_rules = {}
-        self.__failed_rules = {}
-        #
-        #  Capture every value we actually validated per attribute,
-        #  so when a rule fails (or never matches because the value
-        #  never arrived) the result string can show what we DID see
-        #  alongside what we wanted.
-        #
-        self.__seen_values: dict[str, list[str]] = {}
-
-        for key in self.__rules_map.keys():
-            for rule in self.__rules_map[key]:
-                if rule.friendly_str.startswith(
-                    "never_fire"
-                ) or rule.friendly_str.startswith("fail"):
-                    if key not in self.__passed_rules:
-                        self.__passed_rules[key] = []
-                    self.__passed_rules[key].append(rule.friendly_str)
-                elif rule.friendly_str.startswith("may_"):
-                    # May rules are not tracked
-                    continue
-                else:
-                    if key not in self.__failed_rules:
-                        self.__failed_rules[key] = []
-                    self.__failed_rules[key].append(rule.friendly_str)
-
+        self.__checks = {check.name: check for check in checks}
         self.__state_completed = state_completed
         self.__logger = logger
-
-    @property
-    def unmatched_rules(self) -> dict:
-        """
-        Get the rules that have not been matched.
-
-        Returns:
-            dict: A dictionary of unmatched rules.
-        """
-        return self.__rules_tracking
 
     def get_results_str(self, detailed: bool = False) -> str:
         """
@@ -102,6 +54,7 @@ class Validator:
         Returns:
             str: A string representation of the results.
         """
+        # TODO: This should be reworked to output TAP format
         header = "Validation Results"
         detailed_tag = " (Detailed)" if detailed else ""
         header += detailed_tag + "\n"
@@ -110,55 +63,77 @@ class Validator:
         result_str += header
         result_str += "-" * (len(header) - 1) + "\n"
 
-        total = 0
-        matched = 0
-        for key, value in self.__passed_rules.items():
-            key_color = "green"
+        passes: dict = {
+            check.name: check.get_passed_list()
+            for check in self.__checks.values()
+        }
+        fails: dict = {
+            check.name: check.get_failed_conditions()
+            for check in self.__checks.values()
+        }
 
-            if key in self.__failed_rules:
+        for check_name, check in self.__checks.items():
+            # Determine the overall color for the check based on its pass/fail status
+            if check.get_passed_total() > 0 and check.get_failed_total() == 0:
+                key_color = "green"
+            elif (
+                check.get_failed_total() > 0 and check.get_passed_total() == 0
+            ):
                 key_color = "red"
-
-                if len(self.__failed_rules[key]) < len(self.__rules_map[key]):
-                    key_color = "yellow"
-
-            total += len(self.__rules_map[key])
-            matched += len(value)
-
-            if detailed:
-                result_str += f"{colored(key, key_color)}:\n"
-                for v in value:
-                    result_str += f"{' ' * 4}{colored(v, 'green')}\n"
-                if key in self.__failed_rules:
-                    for v in self.__failed_rules[key]:
-                        result_str += f"{' ' * 4}{colored(v, 'red')}\n"
+            elif check.get_failed_total() > 0 and check.get_passed_total() > 0:
+                key_color = "yellow"
             else:
-                result_str += f"{colored(key, key_color)}: {colored(f'{len(value)}/{len(self.__rules_map[key])}', key_color)}\n"
+                key_color = "white"
 
-        for key, values in self.__failed_rules.items():
-            if key not in self.__passed_rules:
-                key_color = "red"
-                total += len(self.__rules_map[key])
+            result_str += f"{colored(check_name, key_color)}:\n"
 
-                result_str += f"{colored(key, key_color)}:\n"
-                result_str += f"{' ' * 4}expected:\n"
-                for v in values:
-                    result_str += f"{' ' * 8}{colored(v, 'red')}\n"
-                #
-                #  Surface what the validator actually observed so
-                #  the operator can see a FAIL vs a never-fired line,
-                #  or a field that just didn't match the pattern.
-                #
-                seen = self.__seen_values.get(key, [])
-                if seen:
-                    result_str += f"{' ' * 4}received ({len(seen)} event(s)):\n"
-                    for s in seen:
-                        result_str += f"{' ' * 8}{colored(s, 'yellow')}\n"
+            for condition in check.validations:
+                if (
+                    condition in passes[check_name]
+                    and condition not in fails[check_name]
+                ):
+                    # This condition always passed
+                    key_color = "green"
+                elif (
+                    condition in fails[check_name]
+                    and condition not in passes[check_name]
+                ):
+                    # This condition always failed
+                    key_color = "red"
+                elif (
+                    condition in fails[check_name]
+                    and condition in passes[check_name]
+                ):
+                    # This condition had mixed results
+                    key_color = "yellow"
                 else:
-                    result_str += f"{' ' * 4}received: {colored('<no events with this trigger seen>', 'yellow')}\n"
+                    # This condition was never evaluated
+                    key_color = "white"
 
-        result_str += "-" * (len(header) - 1) + "\n"
-        result_str += f"Matched: {colored(matched, 'green') if matched > 0 else matched} / {total} "
-        result_str += f"(Failures: {colored(total - matched, 'red') if total - matched > 0 else total - matched})\n"
+                if detailed:
+                    result_str += f"{' ' * 4}{colored(f'{condition[0]}: {condition[1]}', key_color)}\n"
+                elif key_color != "green":
+                    result_str += f"{' ' * 4}{colored(f'{condition[0]}: {condition[1]}', key_color)}\n"
+
+                if condition in fails[check_name]:
+                    result_str += f"{' ' * 8}{colored(f'Received {len(fails[check_name][condition])} event(s):', key_color)}\n"
+                    for event in fails[check_name][condition]:
+                        # Avoid nested single quotes in f-string
+                        expected = event["expected"]
+                        received = event["received"]
+                        result = event["result"]
+                        event_str = f'Expected: "{expected}", Received: "{received}", Result: {result}'
+                        result_str += (
+                            f"{' ' * 12}{colored(event_str, key_color)}\n"
+                        )
+                elif (
+                    condition not in passes[check_name]
+                    and condition not in fails[check_name]
+                ):
+                    result_str += (
+                        f"{' ' * 8}{colored('<no events seen>', key_color)}\n"
+                    )
+
         result_str += "-" * (len(header) - 1) + "\n"
 
         return result_str
@@ -167,83 +142,26 @@ class Validator:
         """
         Returns True if any validation failures have been recorded.
         """
-        return bool(self.__failed_rules)
-
-    def validate(self, attribute: str, value: str) -> bool:
-        """
-        Validates a given attribute-value pair against the rules map.
-
-        Args:
-            attribute (str): The attribute to validate.
-            value (str): The value of the attribute.
-
-        Returns:
-            bool: True if the attribute-value pair is valid, False otherwise.
-
-        Raises:
-            MissingRuleError: If there are no rules defined for the given attribute.
-        """
-        if attribute not in self.__rules_map:
-            self.__logger.debug(
-                "No validation rules for attribute: %s", attribute
-            )
-            raise MissingRuleError(attribute)
-
-        self.__seen_values.setdefault(attribute, []).append(value)
-
-        self.__logger.debug(
-            "Validating attribute: %s, value: %s", attribute, value
-        )
-        self.__logger.debug("Checking rules: %s", self.__rules_map[attribute])
-        for rule in self.__rules_map[attribute]:
-            if hasattr(rule, "friendly_str"):
-                self.__logger.debug("rule params: %s", rule.friendly_str)
-                friendly_str = rule.friendly_str
-            else:
-                friendly_str = {}
-
-            try:
-                if rule(value):
-                    if attribute not in self.__passed_rules:
-                        self.__passed_rules[attribute] = []
-
-                    if friendly_str not in self.__passed_rules[attribute]:
-                        self.__passed_rules[attribute].append(friendly_str)
-
-                    # If this is a must_fire rule, remove it from failed rules
-                    if (
-                        isinstance(friendly_str, str)
-                        and attribute in self.__failed_rules
-                        and friendly_str in self.__failed_rules[attribute]
-                    ):
-                        self.__failed_rules[attribute].remove(friendly_str)
-
-                        # Clean up if no more failed rules for this attribute
-                        if len(self.__failed_rules[attribute]) == 0:
-                            del self.__failed_rules[attribute]
-
-                    return True
-            except SingleRuleFailure as e:
-                # Add the failed rule to the failed rules list
-                if attribute not in self.__failed_rules:
-                    self.__failed_rules[attribute] = []
-                if e not in self.__failed_rules[attribute]:
-                    self.__failed_rules[attribute].append(e)
-                continue
-
-            if attribute not in self.__failed_rules:
-                self.__failed_rules[attribute] = []
-            if friendly_str not in self.__failed_rules[attribute]:
-                self.__failed_rules[attribute].append(friendly_str)
-
-                # Remove from passed rules if it was previously marked as passed
-                if (
-                    attribute in self.__passed_rules
-                    and friendly_str in self.__passed_rules[attribute]
-                ):
-                    self.__passed_rules[attribute].remove(friendly_str)
+        for _, check in self.__checks.items():
+            if check.get_failed_total() > 0:
+                return True
 
         return False
+
+    def validate(self, data: str) -> None:
+        """
+        Validates a given json-formatted string against the rules.
+
+        Args:
+            data (str): The json-formatted string to validate.
+        """
+        self.__logger.debug("Validating data: %s", data)
+        for check_name, check in self.__checks.items():
+            if check.qualify(data):
+                self.__logger.debug("Check qualified: %s", check_name)
+                check.validate(data)
+            else:
+                self.__logger.debug("Check did not qualify: %s", check_name)
 
     async def start_validating(self, msg_queue: asyncio.Queue) -> None:
         """
@@ -256,24 +174,10 @@ class Validator:
             try:
                 msg = await asyncio.wait_for(msg_queue.get(), timeout=None)
                 self.__logger.debug(
-                    "Validating message with trigger: %s and value: %s",
-                    msg[0],
-                    msg[1],
+                    "Validating message: %s",
+                    msg,
                 )
-                try:
-                    result = self.validate(msg[0], msg[1])
-
-                    self.__logger.debug(
-                        "Message validation result: %s",
-                        colored(
-                            "PASSED" if result else "FAILED",
-                            "green" if result else "red",
-                        ),
-                    )
-                except MissingRuleError as e:
-                    self.__logger.debug(
-                        "Message validation skipped (no rules): %s", e
-                    )
+                self.validate(msg)
             except asyncio.TimeoutError:
                 continue
 

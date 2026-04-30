@@ -15,12 +15,36 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE."""
 
-import importlib
-import pkgutil
-from pathlib import Path
+"""
+Validation rule to check if a string matches a regex pattern.
+"""
 
-ignore = ["registry.py"]
+import logging
+import re
 
-for _, mod, _ in pkgutil.iter_modules([str(Path(__file__).parent)]):
-    if mod not in ignore:
-        importlib.import_module(f"{__package__}.{mod}")
+from src.rules.registry import rule
+
+@rule("pattern", "regex")
+def pattern(
+    reg_pattern: str | re.Pattern[str], logger: logging.Logger, data: str
+) -> bool:
+    """
+    Check if a string matches a given regex pattern.
+
+    Args:
+        pattern (str | re.Pattern[str]): The regex pattern to match against.
+        logger (logging.Logger): Logger for debug output.
+        data (str): The string to be checked.
+
+    Returns:
+        bool: True if the string matches the pattern, False otherwise.
+    """
+    if isinstance(reg_pattern, str):
+        reg_pattern = re.compile(reg_pattern)
+
+    match = reg_pattern.match(data)
+    if match:
+        logger.debug("Pattern matched: %s", reg_pattern.pattern)
+        return True
+    logger.debug("Pattern did not match: %s", reg_pattern.pattern)
+    return False

@@ -21,7 +21,7 @@ authors = [
 description = "A tool to run FreeRADIUS multi-server tests."
 readme = "README.md"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -33,6 +33,7 @@ dependencies = [
     "termcolor",
     "aiofiles",
     "watchfiles",
+    "jsonpath_ng==1.8.0"
 ]
 
 [tool.hatch.version]

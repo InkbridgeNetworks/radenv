@@ -1,0 +1,86 @@
+timeout: 40
+state_order: sequence
+states:
+  state_1:
+    description: Basic access-request test
+    host:
+      radius-client:
+        actions:
+        - access_request:
+            target: freeradius
+            secret: testing123
+            username: testuser
+            password: testpass
+    verify:
+      timeout: 15
+      trigger_mode: unordered
+      checks:
+      - check_request_sent:
+          qualifiers:
+            source: freeradius
+            trigger: request_sent
+          validations:
+            msg.text: (\w+) request sent
+            msg.count:
+               range:
+                 minimum: 4
+                 maximum: 10
+      - check_request_complete:
+          qualifiers:   
+            source: freeradius
+            trigger: request_complete
+          validations:
+            msg: (\w+) request complete
+      - check_request_reapable:
+          qualifiers:
+            source: freeradius
+            trigger: request_state_reapable
+          validations:
+            msg: (\w+) request reapable
+      - check_request_cancel:
+          qualifiers:
+            source: freeradius
+            trigger: request_state_cancel
+          validations:
+            msg: (\w+) request cancel
+      - check_foo:
+          qualifiers:
+            source: freeradius
+          validations:
+            msg: "foo should never pass"
+      - check_bar:
+          qualifiers:
+            source: freeradius
+          validations:
+            msg: "bar should never pass"
+  state_2:
+    description: Introduce 100% packet loss on the radius server
+    host:
+      freeradius:
+        actions:
+        - packet_loss:
+            interface: eth0
+            loss: 100
+      radius-client:
+        actions:
+        - access_request:
+            target: freeradius
+            secret: testing123
+            username: testuser
+            password: testpass
+    verify:
+      timeout: 15
+      trigger_mode: unordered
+      checks:
+      - check_request_sent:
+          qualifiers:
+            source: freeradius
+            trigger: request_sent
+          validations:
+            msg: (\w+) request sent
+      - check_request_complete:
+          qualifiers:
+            source: freeradius
+            trigger: request_complete
+          validations:
+            msg: (\w+) request complete

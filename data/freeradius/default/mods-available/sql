@@ -289,8 +289,16 @@ sql {
 		triggers = yes
 
 		trigger {
-			connection_connecting = %linelog_test_framework("connection_connecting ${...:name} connection to ${...server} connecting")
-			connection_closed = %linelog_test_framework("connection_closed ${...:name} connection to ${...server} closed")
+			connection_connecting = %linelog_test_framework("{\
+									\"source\": \"freeradius\", \
+        							\"trigger\": \"connection_connecting\", \
+        							\"msg\": \"sql connection to server connecting\" \
+    							}")
+			connection_closed = %linelog_test_framework("{\
+									\"source\": \"freeradius\", \
+        							\"trigger\": \"connection_closed\", \
+        							\"msg\": \"sql connection to server closed\" \
+    							}")
 		}
 
 		#
@@ -304,19 +312,32 @@ sql {
 			triggers = yes
 
 			trigger {
-				request_init = %linelog_test_framework("request_init ${....:name} request init")
-				request_unassigned = %linelog_test_framework("request_unassigned ${....:name} request unassigned")
-				request_backlog = %linelog_test_framework("request_backlog ${....:name} request backlog")
-				request_pending = %linelog_test_framework("request_pending ${....:name} request pending")
-				request_partial = %linelog_test_framework("request_partial ${....:name} request partial")
-				request_sent = %linelog_test_framework("request_sent ${....:name} request sent: 5")
-				request_state_reapable = %linelog_test_framework("request_state_reapable ${....:name} request reapable")
-				request_complete = %linelog_test_framework("request_complete ${....:name} request complete.")
-				request_state_failed = %linelog_test_framework("request_state_failed ${....:name} request failed.")
-				request_state_cancel = %linelog_test_framework("request_state_cancel ${....:name} request cancelled.")
-				request_state_cancel_sent = %linelog_test_framework("request_state_cancel_sent ${....:name} request cancel sent.")
-				request_state_cancel_partial = %linelog_test_framework("request_state_cancel_partial ${....:name} request cancel partial.")
-				request_state_cancel_complete = %linelog_test_framework("request_state_cancel_complete ${....:name} request cancel complete.")
+				request_sent = %linelog_test_framework("{\
+									\"source\": \"freeradius\", \
+        							\"trigger\": \"request_sent\", \
+        							\"msg\": { \
+										\"text\": \"sql request sent\", \
+										\"count\": \"5\" \
+									} \
+    							}")
+				
+				request_complete = %linelog_test_framework("{\
+									\"source\": \"freeradius\", \
+        							\"trigger\": \"request_complete\", \
+        							\"msg\": \"sql request complete\" \
+    							}")
+				
+				request_state_cancel = %linelog_test_framework("{\
+									\"source\": \"freeradius\", \
+        							\"trigger\": \"request_state_cancel\", \
+        							\"msg\": \"sql request cancelled\" \
+    							}")
+
+				request_state_reapable = %linelog_test_framework("{\
+									\"source\": \"freeradius\", \
+        							\"trigger\": \"request_state_reapable\", \
+        							\"msg\": \"sql request reapable\" \
+    							}")
 			}
 
 			#

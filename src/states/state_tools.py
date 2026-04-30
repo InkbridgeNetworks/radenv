@@ -27,10 +27,8 @@ from pathlib import Path
 import yaml
 from src.events.event_tools import get_events
 from src import logging_helper
-from src.rules.rules_tools import (
-    generate_rules_map,
-)
 from src.states.state import State
+from src.check import Check
 
 
 def generate_states(
@@ -74,7 +72,7 @@ def generate_states(
                 name=state_config.get("name", "Unnamed State"),
                 description=state_config.get("description", ""),
                 actions=state_config.get("actions", []),
-                rules_map=state_config.get("rules_map", {}),
+                checks=state_config.get("checks", []),
                 timeout=state_config.get("timeout", 15),
                 loop=loop,
                 logger=test_logger,
@@ -196,10 +194,14 @@ def parse_test_configs(
         # Parse the rules map
         # TODO: Handle ordered vs unordered triggers
         # TODO: Should the test logger be used here?
-        rules_map = generate_rules_map(state=state, logger=logger)
+        checks = [
+            Check.from_config(name, data, logger)
+            for check in state.get("verify", {}).get("checks", [])
+            for name, data in [next(iter(check.items()))]
+        ]
 
         state_config["actions"] = actions
-        state_config["rules_map"] = rules_map
+        state_config["checks"] = checks
 
         configs.append(state_config)
     return timeout, state_order, configs

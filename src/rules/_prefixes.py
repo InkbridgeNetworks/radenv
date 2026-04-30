@@ -15,12 +15,27 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE."""
 
-import importlib
-import pkgutil
-from pathlib import Path
+"""
+Prefixes can be used to modify the behavior of rules. They are applied before
+the rule is evaluated and can change the default return value or the way the
+rule is evaluated. This allows for more flexible and powerful rule definitions
+without needing to create new rules for every variation of behavior.
+"""
 
-ignore = ["registry.py"]
+from src.rule import Rule
+from src.rules.registry import prefix
 
-for _, mod, _ in pkgutil.iter_modules([str(Path(__file__).parent)]):
-    if mod not in ignore:
-        importlib.import_module(f"{__package__}.{mod}")
+
+@prefix("fail_", "not_")
+def fail(rule: Rule) -> Rule:
+    """
+    A rule that should never pass.
+
+    Args:
+        rule (Rule): The rule to modify.
+
+    Returns:
+        Rule: The modified rule that should never pass.
+    """
+    rule.default_return = False
+    return rule

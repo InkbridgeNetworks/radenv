@@ -25,6 +25,7 @@ from pathlib import Path
 import platform
 
 import aiofiles
+import json
 from watchfiles import awatch, Change
 
 from src import logging_helper
@@ -104,6 +105,24 @@ class Listener(ABC):
         )
         return True
 
+    def _process_message(self, message: str) -> None:
+        """
+        Processes a single message and puts it into the message queue.
+
+        Args:
+            message (str): The incoming message.
+        """
+        self.logger.debug("Processing message: %s", message)
+
+        try:
+            self.msg_queue.put_nowait(json.loads(message))
+        except json.JSONDecodeError as e:
+            self.logger.warning(
+                "Failed to decode message as JSON: %s. Error: %s",
+                message,
+                e,
+            )
+
 
 class SocketListener(Listener):
     """
@@ -130,22 +149,7 @@ class SocketListener(Listener):
                 data = await reader.readuntil(b"\n")
                 message = data.rstrip(b"\n")
 
-                space_index = message.find(b" ")
-                if space_index == -1:
-                    self.logger.warning(
-                        "Invalid message format: %s. Expected 'trigger_name trigger_value'.",
-                        message,
-                    )
-                    continue
-                trigger_name = message[:space_index].decode(
-                    "ascii", errors="ignore"
-                )
-
-                trigger_value = message[space_index + 1 :]
-
-                self.logger.debug("Received message: %s", message)
-
-                self.msg_queue.put_nowait((trigger_name, trigger_value))
+                self._process_message(message.decode("utf-8", errors="ignore"))
         except asyncio.IncompleteReadError:
             self.logger.debug("Client disconnected.")
         finally:
@@ -202,26 +206,6 @@ class FileListener(Listener):
 
     listener_fr_config: Path = Path("linelog_file")
     listener_source: aiofiles.threadpool.text.AsyncTextIOWrapper = None
-
-    def __process_message(self, message: str) -> None:
-        """
-        Processes a single message and puts it into the message queue.
-
-        Args:
-            message (str): The incoming message.
-        """
-        self.logger.debug("Processing message: %s", message)
-
-        if " " not in message:
-            self.logger.warning(
-                "Invalid message format: %s. Expected 'trigger_name trigger_value'.",
-                message,
-            )
-            return
-
-        trigger_name, trigger_value = message.split(" ", 1)
-
-        self.msg_queue.put_nowait((trigger_name, trigger_value))
 
     async def start(self) -> None:
         """
@@ -287,7 +271,7 @@ class FileListener(Listener):
                                 self.logger.debug(
                                     "Received message: %s", message
                                 )
-                                self.__process_message(message)
+                                self._process_message(message)
 
                             self.logger.debug(
                                 "Processed all existing lines in file %s",
@@ -316,7 +300,7 @@ class FileListener(Listener):
                                     self.logger.debug(
                                         "Received message: %s", message
                                     )
-                                    self.__process_message(message)
+                                    self._process_message(message)
 
                                 self.logger.debug(
                                     "Processed all new lines in file %s",

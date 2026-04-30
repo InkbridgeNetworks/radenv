@@ -23,6 +23,7 @@ import logging
 
 from src import logging_helper
 from src.Validator import Validator
+from src.check import Check
 
 
 class State:
@@ -38,7 +39,7 @@ class State:
         name: str,
         description: str = "",
         actions: list[callable] | None = None,  # TODO: "actions" or "events"?
-        rules_map: dict | None = None,
+        checks: list[Check] | None = None,
         timeout: int = 15,
         loop: asyncio.AbstractEventLoop | None = None,
         logger: logging.Logger = logging_helper.get_logger(),
@@ -63,7 +64,7 @@ class State:
         self.state_completed = loop.create_future()
 
         self.validator = Validator(
-            rules_map if rules_map is not None else {},
+            checks if checks is not None else [],
             self.state_completed,
             self.logger,
         )

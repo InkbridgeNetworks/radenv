@@ -4,3 +4,4 @@ pyyaml
 termcolor
 aiofiles
 watchfiles
+jsonpath_ng==1.8.0
