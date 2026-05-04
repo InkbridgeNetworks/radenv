@@ -184,6 +184,7 @@ class Test:
             self.client.compose.up,
             detach=True,
             quiet=True,
+            wait=True,
         )
         up_exc: Exception | None = None
         try:

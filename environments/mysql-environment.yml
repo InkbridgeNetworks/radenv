@@ -32,6 +32,12 @@ services:
     - ${LISTENER_DIR}/:/var/run/multi-server/
     command: radiusd -X
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'Message-Authenticator = 0x00' | radclient localhost:1812 status testing123"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
     entrypoint:
     - bash
     - -c
