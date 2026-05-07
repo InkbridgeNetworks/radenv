@@ -117,7 +117,7 @@ class Test:
         self.queue: asyncio.Queue = asyncio.Queue()
         self.listener_task: asyncio.Task = None
         if project_name is None:
-            project_name = f"{self.name}-{self.compose_file.stem}"
+            project_name = self.name
         self.client = DockerClient(
             compose_files=[self.compose_file], compose_project_name=project_name
         )
