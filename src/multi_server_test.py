@@ -154,6 +154,7 @@ def build_tests(
                         force_build=force_build,
                         project_name=project_name,
                         log_dir=log_dir,
+                        seed=seed,
                     )
                 )
             except ValueError as e:
@@ -200,6 +201,7 @@ def build_tests(
                     force_build=force_build,
                     project_name=project_name,
                     log_dir=log_dir,
+                    seed=seed,
                 )
             )
         except ValueError as e:

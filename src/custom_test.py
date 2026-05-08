@@ -22,13 +22,12 @@ from functools import partial
 import logging
 import os
 from pathlib import Path
-import re
-
 from python_on_whales import DockerClient
 
 from src import ExitCodes, logging_helper
 from src.states.state import State
 from src.listener import Listener, SocketListener, FileListener
+from src.tap_logger import TAPLogger
 
 
 def create_test_logger(name: str, env_name: str) -> logging.Logger:
@@ -104,6 +103,7 @@ class Test:
         force_build: bool = False,
         project_name: str | None = None,
         log_dir: Path = Path("logs"),
+        **metadata,
     ) -> None:
         self.name = name
         self.states = states
@@ -138,6 +138,7 @@ class Test:
         self.logging_task: asyncio.Task = None
         self.container_logging_tasks = []
         self.validation_task: asyncio.Task = None
+        self.metadata = metadata
 
     async def __setup_test(self, log_containers: bool) -> None:
         """
@@ -338,99 +339,70 @@ class Test:
             int: exit code based on ExitCodes enum indicating the result of the test execution.
         """
         self.logger.info("Starting test: %s", self.name)
-
         self.logger.info("Starting test states for %s.", self.name)
-        test_results = []
+
         test_has_failures = []
-        for state in self.states:
-            self.logger.debug(
-                "Processing state: %s - %s", state.name, state.description
-            )
+        detailed = self.detail_level > 0
 
-            # Register new validator for the current state
-            # Clear the message queue to avoid processing old messages
-            self.logger.debug("Clearing message queue for new state.")
-            while not self.queue.empty():
-                try:
-                    self.queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+        tap_path = Path(self.log_dir, f"{self.name}.tap")
+        with open(tap_path, "w", encoding="utf-8") as tap_file:
+            tap = TAPLogger(tap_file)
+            tap.version()
+            for k, v in self.metadata.items():
+                if v is not None:
+                    tap.comment(f"{k}: {v}")
+            tap.plan(len(self.states))
 
-            # Next, setup the state's validator
-            self.logger.debug("Setting up validator for state: %s", state.name)
-            if self.validation_task:
-                # Swap out the previous validation task
-                self.validation_task.cancel()
-                try:
-                    await self.validation_task
-                except asyncio.CancelledError:
-                    pass
-            self.validation_task = self.loop.create_task(
-                state.validator.start_validating(self.queue)
-            )
+            for state in self.states:
+                self.logger.debug(
+                    "Processing state: %s - %s", state.name, state.description
+                )
 
-            # Now, enter the state
-            self.logger.debug("Entering state: %s", state.name)
-            await state.enter_state()
-
-            # Wait for the state to complete
-            self.logger.debug("Waiting for state completion: %s", state.name)
-            await state.wait_for_completion()
-
-            self.logger.info("State completed: %s", state.name)
-
-            # Get the results string and code from the validator
-            result_str = state.validator.get_results_str(self.detail_level > 0)
-            test_results.append(result_str)
-
-            # Determine if there were any failures, add to state failures array
-            test_state_has_failures = state.validator.has_failures()
-            test_has_failures.append(test_state_has_failures)
-
-            self.logger.info(
-                " %s%s%s",
-                f"Test.{self.name}.{self.compose_file.stem}",
-                result_str,
-                f"(State: {state.name}{f', Has Failures: {test_state_has_failures}' if test_state_has_failures else ''})",
-            )
-
-        self.logger.info("Test completed: %s", self.name)
-
-        # Remove the coloring from the test results before logging to file
-        def strip_ansi(text):
-            ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-
-            color_prefixes = {
-                "31": "[Failed]",
-                "32": "[Passed]",
-                "33": "[Mixed]",
-            }
-
-            formatted_text = ""
-
-            for line in text.splitlines():
-                prefix = ""
-
-                # Detect color codes and replace with text prefixes to the line
-                for code, label in color_prefixes.items():
-                    if f"\x1b[{code}m" in line:
-                        prefix = label + " "
+                # Register new validator for the current state
+                # Clear the message queue to avoid processing old messages
+                self.logger.debug("Clearing message queue for new state.")
+                while not self.queue.empty():
+                    try:
+                        self.queue.get_nowait()
+                    except asyncio.QueueEmpty:
                         break
 
-                clean_line = ansi_escape.sub("", line)
-                if prefix:
-                    formatted_text += f"{prefix}{clean_line}\n"
-                else:
-                    formatted_text += clean_line + "\n"
+                # Next, setup the state's validator
+                self.logger.debug("Setting up validator for state: %s", state.name)
+                if self.validation_task:
+                    # Swap out the previous validation task
+                    self.validation_task.cancel()
+                    try:
+                        await self.validation_task
+                    except asyncio.CancelledError:
+                        pass
+                self.validation_task = self.loop.create_task(
+                    state.validator.start_validating(self.queue)
+                )
 
-            return formatted_text
+                # Now, enter the state
+                self.logger.debug("Entering state: %s", state.name)
+                await state.enter_state()
 
-        test_results = [strip_ansi(r) for r in test_results]
+                # Wait for the state to complete
+                self.logger.debug("Waiting for state completion: %s", state.name)
+                await state.wait_for_completion()
 
-        file_logger = logging_helper.get_file_logger()
-        for result in test_results:
-            file_logger.info(
-                "%s %s", f"Test.{self.name}.{self.compose_file.stem}", result
-            )
+                self.logger.info("State completed: %s", state.name)
+
+                result_str = state.validator.get_results_str(detailed)
+                test_state_has_failures = state.validator.has_failures()
+                test_has_failures.append(test_state_has_failures)
+
+                self.logger.info(
+                    " %s%s%s",
+                    f"Test.{self.name}.{self.compose_file.stem}",
+                    result_str,
+                    f"(State: {state.name}{f', Has Failures: {test_state_has_failures}' if test_state_has_failures else ''})",
+                )
+
+                tap.subtest(state.name, state.validator.get_tap_results(detailed), detailed)
+
+        self.logger.info("Test completed: %s", self.name)
 
         return ExitCodes.VALIDATION_FAILURE if (True in test_has_failures) else ExitCodes.SUCCESS

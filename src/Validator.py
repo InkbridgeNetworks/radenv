@@ -22,10 +22,9 @@ Validator object
 import asyncio
 import logging
 
-from termcolor import colored
-
 from src.check import Check
 from src import logging_helper
+from src.tap_logger import TAPConditionResult, TAPEvent, TAPLogger, TAPResult
 
 
 class Validator:
@@ -43,100 +42,122 @@ class Validator:
         self.__state_completed = state_completed
         self.__logger = logger
 
+    @staticmethod
+    def _yaml_str(value: object) -> str:
+        """Wrap a value in YAML single-quoted scalar, escaping interior single quotes."""
+        return "'" + str(value).replace("'", "''") + "'"
+
     def get_results_str(self, detailed: bool = False) -> str:
         """
-        Get a string representation of the validation results.
+        Get a TAP version 14 representation of the validation results.
 
-        Args:
-            detailed (bool, optional): Whether to include matched rules in the output.
-                Defaults to False.
-
-        Returns:
-            str: A string representation of the results.
+        Each Check maps to one TAP test point. Checks that fired but had at
+        least one condition failure are 'not ok'; checks that never fired are
+        skipped.  Failed conditions are described in a YAML diagnostics block.
+        When detailed=True, passing conditions are included in the block too.
         """
-        # TODO: This should be reworked to output TAP format
-        header = "Validation Results"
-        detailed_tag = " (Detailed)" if detailed else ""
-        header += detailed_tag + "\n"
-        result_str = "\n"
-        result_str += "-" * (len(header) - 1) + "\n"
-        result_str += header
-        result_str += "-" * (len(header) - 1) + "\n"
+        lines = ["TAP version 14", f"1..{len(self.__checks)}"]
 
-        passes: dict = {
-            check.name: check.get_passed_list()
-            for check in self.__checks.values()
-        }
-        fails: dict = {
-            check.name: check.get_failed_conditions()
-            for check in self.__checks.values()
-        }
+        for i, (check_name, check) in enumerate(self.__checks.items(), start=1):
+            passed_total = check.get_passed_total()
+            failed_total = check.get_failed_total()
+            failed_conditions = check.get_failed_conditions()
 
+            if failed_total == 0 and passed_total == 0:
+                lines.append(f"ok {i} - {check_name} # SKIP no events seen")
+                continue
+
+            status = "not ok" if failed_total > 0 else "ok"
+            lines.append(f"{status} {i} - {check_name}")
+
+            emit_diag = status == "not ok" or (detailed and passed_total > 0)
+            if not emit_diag:
+                continue
+
+            lines.append("  ---")
+
+            if status == "not ok":
+                lines.append(
+                    f"  message: {self._yaml_str(len(failed_conditions))} condition(s) failed"
+                )
+                lines.append("  failed_conditions:")
+                for condition, events in failed_conditions.items():
+                    path, rule = condition
+                    passed_count = check.get_passed_counter()[condition]
+                    lines.append(f"    - condition: {self._yaml_str(f'{path}: {rule}')}")
+                    if passed_count > 0:
+                        lines.append(f"      passed_occurrences: {passed_count}")
+                    lines.append(f"      failed_occurrences: {len(events)}")
+                    lines.append("      events:")
+                    for event in events:
+                        lines.append(f"        - expected: {self._yaml_str(event['expected'])}")
+                        lines.append(f"          received: {self._yaml_str(event['received'])}")
+
+            if detailed:
+                passed_only = [
+                    c for c in check.get_passed_list()
+                    if c not in failed_conditions
+                ]
+                if passed_only:
+                    lines.append("  passed_conditions:")
+                    for condition in passed_only:
+                        path, rule = condition
+                        count = check.get_passed_counter()[condition]
+                        lines.append(f"    - condition: {self._yaml_str(f'{path}: {rule}')}")
+                        lines.append(f"      occurrences: {count}")
+
+            lines.append("  ...")
+
+        return "\n".join(lines) + "\n"
+
+    def get_tap_results(self, detailed: bool = False) -> list[TAPResult]:
+        """
+        Return structured TAP results for each check, suitable for passing to TAPLogger.
+
+        When detailed=True, passing conditions are included so TAPLogger can emit them
+        in the diagnostics block.
+        """
+        results = []
         for check_name, check in self.__checks.items():
-            # Determine the overall color for the check based on its pass/fail status
-            if check.get_passed_total() > 0 and check.get_failed_total() == 0:
-                key_color = "green"
-            elif (
-                check.get_failed_total() > 0 and check.get_passed_total() == 0
-            ):
-                key_color = "red"
-            elif check.get_failed_total() > 0 and check.get_passed_total() > 0:
-                key_color = "yellow"
-            else:
-                key_color = "white"
+            passed_total = check.get_passed_total()
+            failed_total = check.get_failed_total()
+            failed_conditions = check.get_failed_conditions()
 
-            result_str += f"{colored(check_name, key_color)}:\n"
+            if failed_total == 0 and passed_total == 0:
+                results.append(TAPResult(ok=True, name=check_name, skipped=True))
+                continue
 
-            for condition in check.validations:
-                if (
-                    condition in passes[check_name]
-                    and condition not in fails[check_name]
-                ):
-                    # This condition always passed
-                    key_color = "green"
-                elif (
-                    condition in fails[check_name]
-                    and condition not in passes[check_name]
-                ):
-                    # This condition always failed
-                    key_color = "red"
-                elif (
-                    condition in fails[check_name]
-                    and condition in passes[check_name]
-                ):
-                    # This condition had mixed results
-                    key_color = "yellow"
-                else:
-                    # This condition was never evaluated
-                    key_color = "white"
+            failed_conds = [
+                TAPConditionResult(
+                    condition=f"{path}: {rule}",
+                    failed_occurrences=len(events),
+                    events=[
+                        TAPEvent(expected=str(e["expected"]), received=str(e["received"]))
+                        for e in events
+                    ],
+                    passed_occurrences=check.get_passed_counter()[condition],
+                )
+                for condition, events in failed_conditions.items()
+                for path, rule in [condition]
+            ]
 
-                if detailed:
-                    result_str += f"{' ' * 4}{colored(f'{condition[0]}: {condition[1]}', key_color)}\n"
-                elif key_color != "green":
-                    result_str += f"{' ' * 4}{colored(f'{condition[0]}: {condition[1]}', key_color)}\n"
+            passed_conds = []
+            if detailed:
+                passed_conds = [
+                    (f"{path}: {rule}", check.get_passed_counter()[condition])
+                    for condition in check.get_passed_list()
+                    if condition not in failed_conditions
+                    for path, rule in [condition]
+                ]
 
-                if condition in fails[check_name]:
-                    result_str += f"{' ' * 8}{colored(f'Received {len(fails[check_name][condition])} event(s):', key_color)}\n"
-                    for event in fails[check_name][condition]:
-                        # Avoid nested single quotes in f-string
-                        expected = event["expected"]
-                        received = event["received"]
-                        result = event["result"]
-                        event_str = f'Expected: "{expected}", Received: "{received}", Result: {result}'
-                        result_str += (
-                            f"{' ' * 12}{colored(event_str, key_color)}\n"
-                        )
-                elif (
-                    condition not in passes[check_name]
-                    and condition not in fails[check_name]
-                ):
-                    result_str += (
-                        f"{' ' * 8}{colored('<no events seen>', key_color)}\n"
-                    )
+            results.append(TAPResult(
+                ok=failed_total == 0,
+                name=check_name,
+                failed_conditions=failed_conds,
+                passed_conditions=passed_conds,
+            ))
 
-        result_str += "-" * (len(header) - 1) + "\n"
-
-        return result_str
+        return results
 
     def has_failures(self) -> bool:
         """
