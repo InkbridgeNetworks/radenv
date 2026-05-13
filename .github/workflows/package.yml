@@ -3,7 +3,7 @@ name: Publish package to pypi.inkbridge.io
 on:
   release:
     types: [published]
-
+  workflow_dispatch:
 jobs:
   package:
     uses: InkbridgeNetworks/package-repo/.github/workflows/python-package.yml@master
