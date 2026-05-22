@@ -60,10 +60,10 @@ states:
 
 # HOW-TO
 ## Setup (PyPI)
-This package can be installed from our PyPI repo at https://pypi.inkbridge.io/freeradius-multi-server. Once installed, the following commands are available:
-- `multi-server-test` - Runs the main tool for testing
-- `multi-server-test-config` - The config builder that can render a jinja2 config to an <b>envionment</b> and <b>test</b> file.
-- `multi-server-test-setup` - Setup tool that will create the `environments/`, `tests/`, and `data/` directories.
+This package can be installed from our PyPI repo at https://pypi.inkbridge.io/radenv. Once installed, the following commands are available:
+- `radenv` - Runs the main tool for testing
+- `radenv-config` - The config builder that can render a jinja2 config to an <b>envionment</b> and <b>test</b> file.
+- `radenv-setup` - Setup tool that will create the `environments/`, `tests/`, and `data/` directories.
 
 ## Setup (Source)
 To use this tool, first clone the repo and run `make configure` to setup the environment and install the dependencies.
@@ -79,9 +79,9 @@ Next, generate the compose and config files using `python3 -m src.config_builder
 
 ## Example
 ### PyPI
-To use the tool, run `multi-server-test <ARGS>`. For example:
+To use the tool, run `radenv <ARGS>`. For example:
 ```
-multi-server-test -v -t tests/foo.yml
+radenv -v -t tests/foo.yml
 ```
 
 ### Source

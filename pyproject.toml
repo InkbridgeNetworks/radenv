@@ -13,7 +13,7 @@ include = [
 packages = ["src/"]
 
 [project]
-name = "multi-server-test"
+name = "radenv"
 dynamic = ["version"]
 authors = [
     {name = "Ethan Thompson"},
@@ -39,11 +39,11 @@ dependencies = [
 source = "vcs"
 
 [project.urls]
-Homepage = "https://github.com/InkbridgeNetworks/freeradius-multi-server"
-GitHub = "https://github.com/InkbridgeNetworks/freeradius-multi-server"
-Issues = "https://github.com/InkbridgeNetworks/freeradius-multi-server/issues"
+Homepage = "https://github.com/InkbridgeNetworks/radenv"
+GitHub = "https://github.com/InkbridgeNetworks/radenv"
+Issues = "https://github.com/InkbridgeNetworks/radenv/issues"
 
 [project.scripts]
-multi-server-test = "src.multi_server_test:interface"
-multi-server-test-config = "src.config_builder:interface"
-multi-server-test-setup = "src.setup_utils:main"
+radenv = "src.multi_server_test:interface"
+radenv-config = "src.config_builder:interface"
+radenv-setup = "src.setup_utils:main"

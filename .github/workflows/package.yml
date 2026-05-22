@@ -8,7 +8,7 @@ jobs:
   package:
     uses: InkbridgeNetworks/package-repo/.github/workflows/python-package.yml@master
     with:
-      package_name: freeradius-multi-server
+      package_name: radenv
 
       # How many commits to pull down from the src repository.
       # default: 1

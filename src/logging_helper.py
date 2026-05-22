@@ -23,7 +23,7 @@ import logging
 import sys
 from termcolor import colored
 
-logger = logging.getLogger("freeradius-multi-server")
+logger = logging.getLogger("radenv")
 file_logger = logging.getLogger("file")
 
 
